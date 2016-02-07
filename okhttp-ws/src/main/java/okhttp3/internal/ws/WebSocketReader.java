@@ -257,7 +257,9 @@ public final class WebSocketReader {
             Buffer buffer = new Buffer();
           try {
             Okio.buffer(framedMessageSource).readAll(buffer);
+
               deflatedBuffer = inflate(buffer);
+
           } catch (IOException e ) {
             e.printStackTrace();
               deflatedBuffer = new Buffer();
@@ -371,11 +373,19 @@ public final class WebSocketReader {
     InputStream inflatedIn = new InflaterInputStream(deflatedIn, inflater);
     Buffer result = new Buffer();
     byte[] buffer = new byte[8192];
-    while (!inflater.needsInput() || deflated.size() > 0 || deflatedIn.available() > 0) {
+    int bufferSize = 0;
+    long compressedSize = deflated.size();
+
+      while (!inflater.needsInput() || deflated.size() > 0 || deflatedIn.available() > 0) {
       int count = inflatedIn.read(buffer, 0, buffer.length);
       if (count != -1) {
         result.write(buffer, 0, count);
+        bufferSize += count;
       }
+    }
+
+    if(bufferSize > 0) {
+        System.out.println("Compressed size: " + compressedSize + "| Decompressed size: " + bufferSize);
     }
     return result;
   }
