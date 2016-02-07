@@ -225,7 +225,9 @@ public final class WebSocketReader {
     }
   }
 
-  private void readMessageFrame() throws IOException {
+    Buffer deflatedBuffer;
+
+    private void readMessageFrame() throws IOException {
     final MediaType type;
     switch (opcode) {
       case OPCODE_TEXT:
@@ -238,10 +240,8 @@ public final class WebSocketReader {
         throw new ProtocolException("Unknown opcode: " + toHexString(opcode));
     }
 
-    if(isDeflated)
-      inflater = new Inflater(true);
 
-    ResponseBody body = new ResponseBody() {
+      ResponseBody body = new ResponseBody() {
       @Override public MediaType contentType() {
         return type;
       }
@@ -254,35 +254,26 @@ public final class WebSocketReader {
         if(!isDeflated) {
           return Okio.buffer(framedMessageSource);
         } else {
-          Buffer buffer = new Buffer();
-          ByteArrayOutputStream byteOs = new ByteArrayOutputStream();
-
+            Buffer buffer = new Buffer();
           try {
-            InputStream is = Okio.buffer(framedMessageSource).inputStream();
-
-            int nRead;
-            byte[] data = new byte[16384];
-
-            while ((nRead = is.read(data, 0, data.length)) != -1) {
-              byteOs.write(data, 0, nRead);
-            }
-
-            byteOs.flush();
-
-            buffer.write(byteOs.toByteArray());
-
-            return inflate(buffer);
+            Okio.buffer(framedMessageSource).readAll(buffer);
+              deflatedBuffer = inflate(buffer);
           } catch (IOException e ) {
             e.printStackTrace();
+              deflatedBuffer = new Buffer();
           }
 
-            return new Buffer();
+            return deflatedBuffer;
         }
       }
     };
 
     messageClosed = false;
     frameCallback.onMessage(body);
+
+    if(isDeflated)
+        messageClosed = true;
+
     if (!messageClosed) {
       throw new IllegalStateException("Listener failed to call close on message payload.");
     }
