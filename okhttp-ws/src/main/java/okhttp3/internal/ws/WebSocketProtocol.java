@@ -36,7 +36,7 @@ public final class WebSocketProtocol {
   /** Byte 0 flag for whether this is the final fragment in a message. */
   static final int B0_FLAG_FIN = 0b10000000;
   /** Byte 0 reserved flag 1. Must be 0 unless negotiated otherwise. */
-  static final int B0_FLAG_RSV1 = 0b01000000;
+  static final int B0_PERMESSAGE_DEFLATE = 0b01000000;
   /** Byte 0 reserved flag 2. Must be 0 unless negotiated otherwise. */
   static final int B0_FLAG_RSV2 = 0b00100000;
   /** Byte 0 reserved flag 3. Must be 0 unless negotiated otherwise. */

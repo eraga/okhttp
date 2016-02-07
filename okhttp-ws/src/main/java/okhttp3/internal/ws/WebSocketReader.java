@@ -15,21 +15,19 @@
  */
 package okhttp3.internal.ws;
 
-import java.io.EOFException;
-import java.io.IOException;
+import java.io.*;
 import java.net.ProtocolException;
+import java.util.zip.Inflater;
+import java.util.zip.InflaterInputStream;
+
 import okhttp3.MediaType;
 import okhttp3.ResponseBody;
 import okhttp3.ws.WebSocket;
-import okio.Buffer;
-import okio.BufferedSource;
-import okio.Okio;
-import okio.Source;
-import okio.Timeout;
+import okio.*;
 
 import static java.lang.Integer.toHexString;
 import static okhttp3.internal.ws.WebSocketProtocol.B0_FLAG_FIN;
-import static okhttp3.internal.ws.WebSocketProtocol.B0_FLAG_RSV1;
+import static okhttp3.internal.ws.WebSocketProtocol.B0_PERMESSAGE_DEFLATE;
 import static okhttp3.internal.ws.WebSocketProtocol.B0_FLAG_RSV2;
 import static okhttp3.internal.ws.WebSocketProtocol.B0_FLAG_RSV3;
 import static okhttp3.internal.ws.WebSocketProtocol.B0_MASK_OPCODE;
@@ -52,6 +50,10 @@ import static okhttp3.internal.ws.WebSocketProtocol.validateCloseCode;
  * An <a href="http://tools.ietf.org/html/rfc6455">RFC 6455</a>-compatible WebSocket frame reader.
  */
 public final class WebSocketReader {
+  private boolean isDeflated = false;
+
+  private Inflater inflater = new Inflater(true);
+
   public interface FrameCallback {
     void onMessage(ResponseBody body) throws IOException;
 
@@ -107,10 +109,15 @@ public final class WebSocketReader {
     } else {
       readMessageFrame();
     }
+
+    if(isFinalFrame) {
+      isDeflated = false;
+    }
   }
 
   private void readHeader() throws IOException {
     if (closed) throw new IOException("closed");
+    System.out.print("readHeader\n\n");
 
     int b0 = source.readByte() & 0xff;
 
@@ -123,12 +130,20 @@ public final class WebSocketReader {
       throw new ProtocolException("Control frames must be final.");
     }
 
-    boolean reservedFlag1 = (b0 & B0_FLAG_RSV1) != 0;
+    isDeflated = (b0 & B0_PERMESSAGE_DEFLATE) != 0;
+
     boolean reservedFlag2 = (b0 & B0_FLAG_RSV2) != 0;
     boolean reservedFlag3 = (b0 & B0_FLAG_RSV3) != 0;
-    if (reservedFlag1 || reservedFlag2 || reservedFlag3) {
+
+
+    if (reservedFlag2) {
       // Reserved flags are for extensions which we currently do not support.
-      throw new ProtocolException("Reserved flags are unsupported.");
+      throw new ProtocolException("Reserved flag2 is unsupported.");
+    }
+
+    if (reservedFlag3) {
+      // Reserved flags are for extensions which we currently do not support.
+      throw new ProtocolException("Reserved flag3 is unsupported.");
     }
 
     int b1 = source.readByte() & 0xff;
@@ -223,7 +238,9 @@ public final class WebSocketReader {
         throw new ProtocolException("Unknown opcode: " + toHexString(opcode));
     }
 
-    final BufferedSource source = Okio.buffer(framedMessageSource);
+    if(isDeflated)
+      inflater = new Inflater(true);
+
     ResponseBody body = new ResponseBody() {
       @Override public MediaType contentType() {
         return type;
@@ -234,7 +251,33 @@ public final class WebSocketReader {
       }
 
       @Override public BufferedSource source() {
-        return source;
+        if(!isDeflated) {
+          return Okio.buffer(framedMessageSource);
+        } else {
+          Buffer buffer = new Buffer();
+          ByteArrayOutputStream byteOs = new ByteArrayOutputStream();
+
+          try {
+            InputStream is = Okio.buffer(framedMessageSource).inputStream();
+
+            int nRead;
+            byte[] data = new byte[16384];
+
+            while ((nRead = is.read(data, 0, data.length)) != -1) {
+              byteOs.write(data, 0, nRead);
+            }
+
+            byteOs.flush();
+
+            buffer.write(byteOs.toByteArray());
+
+            return inflate(buffer);
+          } catch (IOException e ) {
+            e.printStackTrace();
+          }
+
+            return new Buffer();
+        }
       }
     };
 
@@ -267,7 +310,14 @@ public final class WebSocketReader {
       if (messageClosed) throw new IllegalStateException("closed");
 
       if (frameBytesRead == frameLength) {
-        if (isFinalFrame) return -1; // We are exhausted and have no continuations.
+        if (isFinalFrame) {
+          if(isDeflated) {
+//            byte[] deflateEnd = {0x0, 0x0, (byte)0xff, (byte)0xff};
+//            sink.write(deflateEnd);
+          }
+
+          return -1; // We are exhausted and have no continuations.
+        }
 
         readUntilNonControlFrame();
         if (opcode != OPCODE_CONTINUATION) {
@@ -289,8 +339,10 @@ public final class WebSocketReader {
         sink.write(maskBuffer, 0, (int) read);
       } else {
         read = source.read(sink, toRead);
+
         if (read == -1) throw new EOFException();
       }
+//      System.out.println(frameBytesRead + "!!!" + sink.readByteString().hex());
 
       frameBytesRead += read;
       return read;
@@ -311,6 +363,27 @@ public final class WebSocketReader {
         readUntilNonControlFrame();
         source.skip(frameLength);
       }
+
+
+     }
+  }
+
+  /**
+   * Uses streaming decompression to inflate {@code deflated}. The input must
+   * either be finished or have a trailing sync flush.
+   */
+  private static Buffer inflate(Buffer deflated) throws IOException {
+    InputStream deflatedIn = deflated.inputStream();
+    Inflater inflater = new Inflater(true);
+    InputStream inflatedIn = new InflaterInputStream(deflatedIn, inflater);
+    Buffer result = new Buffer();
+    byte[] buffer = new byte[8192];
+    while (!inflater.needsInput() || deflated.size() > 0 || deflatedIn.available() > 0) {
+      int count = inflatedIn.read(buffer, 0, buffer.length);
+      if (count != -1) {
+        result.write(buffer, 0, count);
+      }
     }
+    return result;
   }
 }
