@@ -271,8 +271,10 @@ public final class WebSocketReader {
     messageClosed = false;
     frameCallback.onMessage(body);
 
-    if(isDeflated)
-        messageClosed = true;
+    if(isDeflated) {
+        System.out.println("closing deflated message");
+        framedMessageSource.close();
+    }
 
     if (!messageClosed) {
       throw new IllegalStateException("Listener failed to call close on message payload.");
