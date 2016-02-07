@@ -11,12 +11,13 @@
 
   <artifactId>okhttp-ws</artifactId>
   <name>OkHttp Web Sockets</name>
+  <version>3.0.1-ws-compression-SNAPSHOT</version>
 
   <dependencies>
     <dependency>
       <groupId>${project.groupId}</groupId>
       <artifactId>okhttp</artifactId>
-      <version>${project.version}</version>
+      <version>3.0.1</version>
     </dependency>
   </dependencies>
 
